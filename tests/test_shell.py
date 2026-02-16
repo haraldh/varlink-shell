@@ -92,6 +92,35 @@ class TestExecution:
         result = execute("help | count")
         assert result[0]["count"] >= 4
 
+    def test_grep_type_dir(self, tmp_path):
+        (tmp_path / "file.txt").write_text("hi")
+        (tmp_path / "subdir").mkdir()
+
+        result = execute(f"ls {tmp_path} | grep type=dir")
+        assert all(obj["type"] == "dir" for obj in result)
+        assert {obj["name"] for obj in result} == {"subdir"}
+
+    def test_grep_multiple_filters(self, tmp_path):
+        (tmp_path / "notes.txt").write_text("hi")
+        (tmp_path / "readme.txt").write_text("hello")
+        (tmp_path / "script.py").write_text("pass")
+        (tmp_path / "subdir").mkdir()
+
+        result = execute(f"ls {tmp_path} | grep type=file name=.txt")
+        assert all(obj["type"] == "file" for obj in result)
+        assert all(".txt" in obj["name"] for obj in result)
+        assert {obj["name"] for obj in result} == {"notes.txt", "readme.txt"}
+
+    def test_grep_no_input(self):
+        result = execute("echo | grep type=dir")
+        assert result == []
+
+    def test_grep_no_matches(self, tmp_path):
+        (tmp_path / "file.txt").write_text("hi")
+
+        result = execute(f"ls {tmp_path} | grep type=dir")
+        assert result == []
+
 
 # ---------------------------------------------------------------------------
 # Raw service.handle() wire-format tests
@@ -124,6 +153,21 @@ class TestWireFormat:
         assert len(replies) == 2
         assert replies[0]["continues"] is True
         assert replies[0]["parameters"]["name"] == "a"
+        assert replies[1].get("continues", False) is False
+
+    def test_grep_wire(self):
+        replies = self._call("Grep", {
+            "args": ["color=red"],
+            "input": [
+                {"color": "red", "size": 1},
+                {"color": "blue", "size": 2},
+                {"color": "darkred", "size": 3},
+            ],
+        })
+        assert len(replies) == 2
+        assert replies[0]["parameters"]["object"] == {"color": "red", "size": 1}
+        assert replies[0]["continues"] is True
+        assert replies[1]["parameters"]["object"] == {"color": "darkred", "size": 3}
         assert replies[1].get("continues", False) is False
 
     def test_count_wire(self):

@@ -60,6 +60,29 @@ class Builtins:
                 "_continues": i < len(entries) - 1,
             }
 
+    def Grep(self, args, input=None, _more=True):
+        filters = []
+        for arg in args:
+            if "=" not in arg:
+                raise varlink.VarlinkError({
+                    "error": "org.varlink.service.InvalidParameter",
+                    "parameters": {"parameter": arg},
+                })
+            k, v = arg.split("=", 1)
+            filters.append((k, v))
+
+        matches = []
+        if input:
+            for obj in input:
+                if all(pattern in str(obj.get(field, "")) for field, pattern in filters):
+                    matches.append(obj)
+
+        for i, obj in enumerate(matches):
+            yield {"object": obj, "_continues": i < len(matches) - 1}
+
+        if not matches:
+            return
+
     def Count(self, input=None, _more=True):
         count = len(input) if input else 0
         yield {"count": count, "_continues": False}
