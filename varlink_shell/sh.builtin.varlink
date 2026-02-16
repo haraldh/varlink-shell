@@ -1,0 +1,13 @@
+interface sh.builtin
+
+# Emit key=value pairs as an object, or pass through piped input
+method Echo(args: []string, input: ?[]object) -> (object: object)
+
+# List directory entries
+method Ls(args: []string) -> (name: string, type: string, size: int)
+
+# Consume input objects and emit their count
+method Count(input: ?[]object) -> (count: int)
+
+# Show available commands and their descriptions
+method Help() -> (command: string, description: string)
