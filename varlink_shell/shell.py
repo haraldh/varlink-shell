@@ -1,3 +1,5 @@
+import collections
+import functools
 import json
 import os
 import re
@@ -270,6 +272,237 @@ class Builtins:
             yield {"object": obj, "_continues": i < len(all_results) - 1}
         if not all_results:
             return
+
+    def Sort(self, args, input=None, _more=True):
+        items = list(input or [])
+        if not items:
+            return
+
+        # Parse args: "-field" means descending
+        keys = []
+        for arg in args:
+            if arg.startswith("-"):
+                keys.append((arg[1:], True))
+            else:
+                keys.append((arg, False))
+
+        def sort_key(obj):
+            parts = []
+            for field, desc in keys:
+                v = obj.get(field)
+                try:
+                    num = float(v)
+                except (TypeError, ValueError):
+                    num = None
+                parts.append((field, v, num, desc))
+            return parts
+
+        def compare(a, b):
+            ka = sort_key(a)
+            kb = sort_key(b)
+            for (_, va, na, desc), (_, vb, nb, _) in zip(ka, kb):
+                if na is not None and nb is not None:
+                    c = (na > nb) - (na < nb)
+                else:
+                    sa, sb = str(va or ""), str(vb or "")
+                    c = (sa > sb) - (sa < sb)
+                if desc:
+                    c = -c
+                if c != 0:
+                    return c
+            return 0
+
+        items.sort(key=functools.cmp_to_key(compare))
+        for i, obj in enumerate(items):
+            yield {"object": obj, "_continues": i < len(items) - 1}
+
+    def Head(self, args, input=None, _more=True):
+        n = int(args[0]) if args else 10
+        items = list(input or [])[:n]
+        for i, obj in enumerate(items):
+            yield {"object": obj, "_continues": i < len(items) - 1}
+        if not items:
+            return
+
+    def Tail(self, args, input=None, _more=True):
+        n = int(args[0]) if args else 10
+        items = list(input or [])[-n:]
+        for i, obj in enumerate(items):
+            yield {"object": obj, "_continues": i < len(items) - 1}
+        if not items:
+            return
+
+    def Uniq(self, args, input=None, _more=True):
+        seen = set()
+        results = []
+        for obj in (input or []):
+            if args:
+                key = tuple(obj.get(f) for f in args)
+            else:
+                key = json.dumps(obj, sort_keys=True)
+            if key not in seen:
+                seen.add(key)
+                results.append(obj)
+        for i, obj in enumerate(results):
+            yield {"object": obj, "_continues": i < len(results) - 1}
+        if not results:
+            return
+
+    def Reverse(self, input=None, _more=True):
+        items = list(reversed(input or []))
+        for i, obj in enumerate(items):
+            yield {"object": obj, "_continues": i < len(items) - 1}
+        if not items:
+            return
+
+    def Sum(self, args, input=None, _more=True):
+        if not args:
+            raise varlink.VarlinkError({
+                "error": "org.varlink.service.InvalidParameter",
+                "parameters": {"parameter": "args"},
+            })
+        field = args[0]
+        total = 0
+        for obj in (input or []):
+            v = obj.get(field, 0)
+            try:
+                total += float(v)
+            except (TypeError, ValueError):
+                pass
+        if total == int(total):
+            total = int(total)
+        yield {"object": {"sum": total}, "_continues": False}
+
+    def Min(self, args, input=None, _more=True):
+        if not args:
+            raise varlink.VarlinkError({
+                "error": "org.varlink.service.InvalidParameter",
+                "parameters": {"parameter": "args"},
+            })
+        field = args[0]
+        items = list(input or [])
+        if not items:
+            return
+
+        def key_fn(obj):
+            v = obj.get(field)
+            try:
+                return (0, float(v))
+            except (TypeError, ValueError):
+                return (1, str(v or ""))
+
+        winner = min(items, key=key_fn)
+        yield {"object": winner, "_continues": False}
+
+    def Max(self, args, input=None, _more=True):
+        if not args:
+            raise varlink.VarlinkError({
+                "error": "org.varlink.service.InvalidParameter",
+                "parameters": {"parameter": "args"},
+            })
+        field = args[0]
+        items = list(input or [])
+        if not items:
+            return
+
+        def key_fn(obj):
+            v = obj.get(field)
+            try:
+                return (0, float(v))
+            except (TypeError, ValueError):
+                return (1, str(v or ""))
+
+        winner = max(items, key=key_fn)
+        yield {"object": winner, "_continues": False}
+
+    def Where(self, args, input=None, _more=True):
+        if not args:
+            raise varlink.VarlinkError({
+                "error": "org.varlink.service.InvalidParameter",
+                "parameters": {"parameter": "args"},
+            })
+
+        # Parse conditions — check longest operators first
+        conditions = []
+        ops = [">=", "<=", "!=", ">", "<", "~", "="]
+        for arg in args:
+            matched = False
+            for op in ops:
+                idx = arg.find(op)
+                if idx > 0:
+                    field = arg[:idx]
+                    value = arg[idx + len(op):]
+                    conditions.append((field, op, value))
+                    matched = True
+                    break
+            if not matched:
+                raise varlink.VarlinkError({
+                    "error": "org.varlink.service.InvalidParameter",
+                    "parameters": {"parameter": arg},
+                })
+
+        def matches(obj):
+            for field, op, value in conditions:
+                actual = obj.get(field)
+                if actual is None:
+                    return False
+                if op == "~":
+                    if not re.search(value, str(actual)):
+                        return False
+                elif op == "=" or op == "!=":
+                    eq = str(actual) == value
+                    if op == "!=" and eq:
+                        return False
+                    if op == "=" and not eq:
+                        return False
+                else:
+                    # Comparison ops: try numeric, fall back to string
+                    try:
+                        a, b = float(actual), float(value)
+                    except (TypeError, ValueError):
+                        a, b = str(actual), value
+                    if op == ">" and not (a > b):
+                        return False
+                    elif op == "<" and not (a < b):
+                        return False
+                    elif op == ">=" and not (a >= b):
+                        return False
+                    elif op == "<=" and not (a <= b):
+                        return False
+            return True
+
+        results = [obj for obj in (input or []) if matches(obj)]
+        for i, obj in enumerate(results):
+            yield {"object": obj, "_continues": i < len(results) - 1}
+        if not results:
+            return
+
+    def Group(self, args, input=None, _more=True):
+        if not args:
+            raise varlink.VarlinkError({
+                "error": "org.varlink.service.InvalidParameter",
+                "parameters": {"parameter": "args"},
+            })
+        field = args[0]
+        counts = collections.OrderedDict()
+        for obj in (input or []):
+            key = obj.get(field)
+            counts[key] = counts.get(key, 0) + 1
+
+        results = [{field: k, "count": v} for k, v in counts.items()]
+        for i, obj in enumerate(results):
+            yield {"object": obj, "_continues": i < len(results) - 1}
+        if not results:
+            return
+
+    def Enumerate(self, input=None, _more=True):
+        items = list(input or [])
+        if not items:
+            return
+        for i, obj in enumerate(items):
+            out = {"index": i}
+            out.update(obj)
+            yield {"object": out, "_continues": i < len(items) - 1}
 
 
 # ---------------------------------------------------------------------------

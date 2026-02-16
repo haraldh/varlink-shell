@@ -113,3 +113,134 @@ method FilterMap(args: []string, input: ?[]object) -> (object: object)
 #   echo a=hello | foreach echo x={a}
 #   echo a=hello | foreach "echo x={a} | grep x=hello"
 method Foreach(args: []string, input: ?[]object) -> (object: object)
+
+# Sort input objects by one or more fields
+#
+# Orders objects by the given field names.  Prefix a field with - for
+# descending order.  Numeric values are compared numerically; others
+# are compared as strings.  Multiple fields create a multi-key sort
+# (first field is primary, second is tiebreaker, etc.).  With no args,
+# sorts by all fields.
+#
+# Examples:
+#   ls | sort name
+#   ls | sort -size
+#   ls | sort type -size
+method Sort(args: []string, input: ?[]object) -> (object: object)
+
+# Take the first N input objects
+#
+# Emits only the first N objects from the input stream.  The default
+# is 10 when no argument is given.  Useful for previewing large result
+# sets or limiting output after sorting.
+#
+# Examples:
+#   ls | head
+#   ls | head 5
+#   ls | sort -size | head 3
+method Head(args: []string, input: ?[]object) -> (object: object)
+
+# Take the last N input objects
+#
+# Emits only the last N objects from the input stream.  The default
+# is 10 when no argument is given.  Useful for seeing the end of a
+# sorted list.
+#
+# Examples:
+#   ls | tail
+#   ls | tail 5
+#   ls | sort size | tail 3
+method Tail(args: []string, input: ?[]object) -> (object: object)
+
+# Remove duplicate objects
+#
+# Deduplicates input objects, preserving the first occurrence.  With
+# field arguments, uniqueness is determined by the values of those
+# fields only.  Without arguments, the entire object is compared.
+#
+# Examples:
+#   ls | uniq type
+#   ls | map type | uniq type
+#   echo a=1 b=2 | echo a=1 b=2 | uniq
+method Uniq(args: []string, input: ?[]object) -> (object: object)
+
+# Reverse the order of input objects
+#
+# Emits all input objects in reverse order.  Takes no arguments.
+# Often combined with sort for descending-then-reverse or to flip
+# the natural order of a data source.
+#
+# Examples:
+#   ls | reverse
+#   ls | sort size | reverse
+method Reverse(input: ?[]object) -> (object: object)
+
+# Sum a numeric field across all input objects
+#
+# Requires exactly one field name argument.  Sums the numeric values
+# of that field across all input objects and emits a single object
+# with the total.  Non-numeric or missing values are treated as 0.
+#
+# Examples:
+#   ls | sum size
+#   ls | grep type=file | sum size
+method Sum(args: []string, input: ?[]object) -> (object: object)
+
+# Find the object with the smallest value for a field
+#
+# Requires exactly one field name argument.  Returns the full input
+# object that has the smallest value for the given field.  Numeric
+# values are compared numerically.  With empty input, returns nothing.
+#
+# Examples:
+#   ls | min size
+#   ls | grep type=file | min size
+method Min(args: []string, input: ?[]object) -> (object: object)
+
+# Find the object with the largest value for a field
+#
+# Requires exactly one field name argument.  Returns the full input
+# object that has the largest value for the given field.  Numeric
+# values are compared numerically.  With empty input, returns nothing.
+#
+# Examples:
+#   ls | max size
+#   ls | grep type=file | max size
+method Max(args: []string, input: ?[]object) -> (object: object)
+
+# Filter objects using comparison operators
+#
+# Each argument is a condition: field=value (exact match),
+# field!=value, field>value, field<value, field>=value, field<=value,
+# or field~pattern (regex match).  Numeric comparisons are used when
+# both sides are numeric; otherwise string comparison applies.
+# Multiple conditions use AND logic.
+#
+# Examples:
+#   ls | where size>1000
+#   ls | where type=file size>=100
+#   ls | where name~"\.py$"
+#   ls | where type!=dir
+method Where(args: []string, input: ?[]object) -> (object: object)
+
+# Group objects by a field and count occurrences
+#
+# Requires exactly one field name argument.  Groups input objects by
+# the value of that field and emits one object per group with the
+# field value and a count.  Groups are ordered by first occurrence.
+#
+# Examples:
+#   ls | group type
+#   ls | group type | sort -count
+method Group(args: []string, input: ?[]object) -> (object: object)
+
+# Add a zero-based index field to each object
+#
+# Adds an "index" field to each input object, starting at 0.  Takes
+# no arguments.  Useful for numbering results or tracking position
+# in a pipeline.
+#
+# Examples:
+#   ls | enumerate
+#   ls | sort -size | enumerate
+method Enumerate(input: ?[]object) -> (object: object)

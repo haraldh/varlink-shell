@@ -388,3 +388,369 @@ class TestWireFormatMapForeach(TestWireFormat):
         })
         assert len(replies) == 1
         assert replies[0]["parameters"]["object"] == {"a": 1}
+
+
+# ---------------------------------------------------------------------------
+# Sort tests
+# ---------------------------------------------------------------------------
+
+class TestSort:
+    def test_sort_by_field(self):
+        prog = "import json; print(json.dumps([{'n':'b','v':2},{'n':'a','v':1},{'n':'c','v':3}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | sort n')
+        assert [o["n"] for o in result] == ["a", "b", "c"]
+
+    def test_sort_descending(self):
+        prog = "import json; print(json.dumps([{'n':'a','v':1},{'n':'b','v':3},{'n':'c','v':2}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | sort -v')
+        assert [o["v"] for o in result] == [3, 2, 1]
+
+    def test_sort_numeric(self):
+        prog = "import json; print(json.dumps([{'s':100},{'s':20},{'s':3}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | sort s')
+        assert [o["s"] for o in result] == [3, 20, 100]
+
+    def test_sort_multi_key(self):
+        prog = "import json; print(json.dumps([{'t':'b','s':2},{'t':'a','s':1},{'t':'a','s':3}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | sort t -s')
+        assert [(o["t"], o["s"]) for o in result] == [("a", 3), ("a", 1), ("b", 2)]
+
+    def test_sort_empty(self):
+        result = execute("sort name")
+        assert result == []
+
+    def test_sort_pipeline(self, tmp_path):
+        (tmp_path / "big.txt").write_text("x" * 100)
+        (tmp_path / "small.txt").write_text("x")
+        result = execute(f"ls {tmp_path} | sort -size | head 1")
+        assert result[0]["name"] == "big.txt"
+
+
+# ---------------------------------------------------------------------------
+# Head tests
+# ---------------------------------------------------------------------------
+
+class TestHead:
+    def test_head_default(self):
+        prog = "import json; print(json.dumps([{'i':n} for n in range(20)]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | head')
+        assert len(result) == 10
+        assert result[0]["i"] == 0
+
+    def test_head_n(self):
+        prog = "import json; print(json.dumps([{'i':n} for n in range(20)]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | head 3')
+        assert len(result) == 3
+
+    def test_head_more_than_available(self):
+        result = execute("echo a=1 | head 5")
+        assert len(result) == 1
+
+    def test_head_empty(self):
+        result = execute("head 5")
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Tail tests
+# ---------------------------------------------------------------------------
+
+class TestTail:
+    def test_tail_default(self):
+        prog = "import json; print(json.dumps([{'i':n} for n in range(20)]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | tail')
+        assert len(result) == 10
+        assert result[0]["i"] == 10
+
+    def test_tail_n(self):
+        prog = "import json; print(json.dumps([{'i':n} for n in range(20)]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | tail 3')
+        assert len(result) == 3
+        assert result[0]["i"] == 17
+
+    def test_tail_more_than_available(self):
+        result = execute("echo a=1 | tail 5")
+        assert len(result) == 1
+
+    def test_tail_empty(self):
+        result = execute("tail 5")
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Uniq tests
+# ---------------------------------------------------------------------------
+
+class TestUniq:
+    def test_uniq_by_field(self):
+        prog = "import json; print(json.dumps([{'t':'a','v':1},{'t':'b','v':2},{'t':'a','v':3}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | uniq t')
+        assert len(result) == 2
+        assert result[0]["t"] == "a"
+        assert result[0]["v"] == 1  # first occurrence preserved
+        assert result[1]["t"] == "b"
+
+    def test_uniq_whole_object(self):
+        prog = "import json; print(json.dumps([{'a':1},{'a':1},{'a':2}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | uniq')
+        assert len(result) == 2
+
+    def test_uniq_empty(self):
+        result = execute("uniq name")
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Reverse tests
+# ---------------------------------------------------------------------------
+
+class TestReverse:
+    def test_reverse(self):
+        prog = "import json; print(json.dumps([{'i':1},{'i':2},{'i':3}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | reverse')
+        assert [o["i"] for o in result] == [3, 2, 1]
+
+    def test_reverse_empty(self):
+        result = execute("reverse")
+        assert result == []
+
+    def test_reverse_single(self):
+        result = execute("echo a=1 | reverse")
+        assert result == [{"a": "1"}]
+
+
+# ---------------------------------------------------------------------------
+# Sum tests
+# ---------------------------------------------------------------------------
+
+class TestSum:
+    def test_sum(self):
+        prog = "import json; print(json.dumps([{'v':10},{'v':20},{'v':30}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | sum v')
+        assert result == [{"sum": 60}]
+
+    def test_sum_missing_values(self):
+        prog = "import json; print(json.dumps([{'v':10},{'x':5},{'v':20}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | sum v')
+        assert result == [{"sum": 30}]
+
+    def test_sum_empty(self):
+        result = execute("sum size")
+        assert result == [{"sum": 0}]
+
+    def test_sum_no_args_error(self):
+        with pytest.raises(RuntimeError, match="InvalidParameter"):
+            execute("echo a=1 | sum")
+
+    def test_sum_pipeline(self, tmp_path):
+        (tmp_path / "a.txt").write_text("hello")
+        (tmp_path / "b.txt").write_text("world!")
+        result = execute(f"ls {tmp_path} | sum size")
+        assert result[0]["sum"] == 11
+
+
+# ---------------------------------------------------------------------------
+# Min tests
+# ---------------------------------------------------------------------------
+
+class TestMin:
+    def test_min(self):
+        prog = "import json; print(json.dumps([{'n':'a','v':3},{'n':'b','v':1},{'n':'c','v':2}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | min v')
+        assert result == [{"n": "b", "v": 1}]
+
+    def test_min_empty(self):
+        result = execute("min size")
+        assert result == []
+
+    def test_min_no_args_error(self):
+        with pytest.raises(RuntimeError, match="InvalidParameter"):
+            execute("echo a=1 | min")
+
+
+# ---------------------------------------------------------------------------
+# Max tests
+# ---------------------------------------------------------------------------
+
+class TestMax:
+    def test_max(self):
+        prog = "import json; print(json.dumps([{'n':'a','v':3},{'n':'b','v':1},{'n':'c','v':2}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | max v')
+        assert result == [{"n": "a", "v": 3}]
+
+    def test_max_empty(self):
+        result = execute("max size")
+        assert result == []
+
+    def test_max_no_args_error(self):
+        with pytest.raises(RuntimeError, match="InvalidParameter"):
+            execute("echo a=1 | max")
+
+    def test_max_pipeline(self, tmp_path):
+        (tmp_path / "small.txt").write_text("x")
+        (tmp_path / "big.txt").write_text("x" * 100)
+        result = execute(f"ls {tmp_path} | max size")
+        assert result[0]["name"] == "big.txt"
+
+
+# ---------------------------------------------------------------------------
+# Where tests
+# ---------------------------------------------------------------------------
+
+class TestWhere:
+    def test_where_equals(self):
+        prog = "import json; print(json.dumps([{'t':'file','s':10},{'t':'dir','s':20}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | where t=file')
+        assert len(result) == 1
+        assert result[0]["t"] == "file"
+
+    def test_where_not_equals(self):
+        prog = "import json; print(json.dumps([{'t':'file'},{'t':'dir'}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | where t!=dir')
+        assert len(result) == 1
+        assert result[0]["t"] == "file"
+
+    def test_where_greater(self):
+        prog = "import json; print(json.dumps([{'s':10},{'s':100},{'s':1000}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | where s>50')
+        assert len(result) == 2
+        assert result[0]["s"] == 100
+
+    def test_where_less(self):
+        prog = "import json; print(json.dumps([{'s':10},{'s':100},{'s':1000}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | where s<100')
+        assert len(result) == 1
+        assert result[0]["s"] == 10
+
+    def test_where_gte(self):
+        prog = "import json; print(json.dumps([{'s':10},{'s':100},{'s':1000}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | where s>=100')
+        assert len(result) == 2
+
+    def test_where_lte(self):
+        prog = "import json; print(json.dumps([{'s':10},{'s':100},{'s':1000}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | where s<=100')
+        assert len(result) == 2
+
+    def test_where_regex(self):
+        prog = r"""import json; print(json.dumps([{'n':'foo.py'},{'n':'bar.txt'},{'n':'baz.py'}]))"""
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | where n~\\.py$')
+        assert len(result) == 2
+        assert all(o["n"].endswith(".py") for o in result)
+
+    def test_where_and_logic(self):
+        prog = "import json; print(json.dumps([{'t':'file','s':10},{'t':'file','s':100},{'t':'dir','s':200}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | where t=file s>50')
+        assert len(result) == 1
+        assert result[0]["s"] == 100
+
+    def test_where_no_args_error(self):
+        with pytest.raises(RuntimeError, match="InvalidParameter"):
+            execute("echo a=1 | where")
+
+    def test_where_empty(self):
+        result = execute("where size>0")
+        assert result == []
+
+    def test_where_pipeline(self, tmp_path):
+        (tmp_path / "small.txt").write_text("x")
+        (tmp_path / "big.txt").write_text("x" * 100)
+        result = execute(f"ls {tmp_path} | where size>50")
+        assert len(result) == 1
+        assert result[0]["name"] == "big.txt"
+
+
+# ---------------------------------------------------------------------------
+# Group tests
+# ---------------------------------------------------------------------------
+
+class TestGroup:
+    def test_group(self):
+        prog = "import json; print(json.dumps([{'t':'file'},{'t':'dir'},{'t':'file'},{'t':'file'}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | group t')
+        assert len(result) == 2
+        by_type = {o["t"]: o["count"] for o in result}
+        assert by_type == {"file": 3, "dir": 1}
+
+    def test_group_empty(self):
+        result = execute("group type")
+        assert result == []
+
+    def test_group_no_args_error(self):
+        with pytest.raises(RuntimeError, match="InvalidParameter"):
+            execute("echo a=1 | group")
+
+    def test_group_pipeline(self, tmp_path):
+        (tmp_path / "a.txt").write_text("x")
+        (tmp_path / "b.txt").write_text("x")
+        (tmp_path / "sub").mkdir()
+        result = execute(f"ls {tmp_path} | group type")
+        by_type = {o["type"]: o["count"] for o in result}
+        assert by_type["file"] == 2
+        assert by_type["dir"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Enumerate tests
+# ---------------------------------------------------------------------------
+
+class TestEnumerate:
+    def test_enumerate(self):
+        prog = "import json; print(json.dumps([{'n':'a'},{'n':'b'},{'n':'c'}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | enumerate')
+        assert len(result) == 3
+        assert result[0] == {"index": 0, "n": "a"}
+        assert result[1] == {"index": 1, "n": "b"}
+        assert result[2] == {"index": 2, "n": "c"}
+
+    def test_enumerate_empty(self):
+        result = execute("enumerate")
+        assert result == []
+
+    def test_enumerate_pipeline(self, tmp_path):
+        (tmp_path / "a.txt").touch()
+        (tmp_path / "b.txt").touch()
+        result = execute(f"ls {tmp_path} | enumerate")
+        assert result[0]["index"] == 0
+        assert result[1]["index"] == 1
+        assert "name" in result[0]
+
+
+# ---------------------------------------------------------------------------
+# Integration / pipeline composition tests
+# ---------------------------------------------------------------------------
+
+class TestPipelineComposition:
+    def test_sort_head(self):
+        prog = "import json; print(json.dumps([{'v':3},{'v':1},{'v':2}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | sort v | head 2')
+        assert [o["v"] for o in result] == [1, 2]
+
+    def test_sort_tail(self):
+        prog = "import json; print(json.dumps([{'v':3},{'v':1},{'v':2}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | sort v | tail 1')
+        assert result == [{"v": 3}]
+
+    def test_where_count(self):
+        prog = "import json; print(json.dumps([{'t':'file','s':10},{'t':'dir','s':20},{'t':'file','s':30}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | where t=file | count')
+        assert result == [{"count": 2}]
+
+    def test_group_sort(self):
+        prog = "import json; print(json.dumps([{'t':'a'},{'t':'b'},{'t':'a'},{'t':'a'}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | group t | sort -count')
+        assert result[0]["t"] == "a"
+        assert result[0]["count"] == 3
+
+    def test_sort_enumerate(self):
+        prog = "import json; print(json.dumps([{'v':3},{'v':1},{'v':2}]))"
+        result = execute(f'jsexec {sys.executable} -c "{prog}" | sort v | enumerate')
+        assert result[0] == {"index": 0, "v": 1}
+        assert result[2] == {"index": 2, "v": 3}
+
+    def test_help_lists_new_commands(self):
+        result = execute("help")
+        commands = {obj["command"] for obj in result}
+        for cmd in ["sort", "head", "tail", "uniq", "reverse",
+                     "sum", "min", "max", "where", "group", "enumerate"]:
+            assert cmd in commands

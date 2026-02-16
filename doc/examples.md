@@ -231,3 +231,136 @@ vsh> jsexec ip -j link | grep operstate=UP | map ifname mtu
 ```
 vsh> jsexec curl -s https://api.github.com/users/varlink/repos | grep language=Python | map name stargazers_count | grep stargazers_count=0
 ```
+
+---
+
+## Sorting and Slicing
+
+### Sort files by size (largest first)
+
+```
+vsh> ls | sort -size
+vsh> ls | sort -size | head 5
+```
+
+### Sort by multiple fields
+
+```
+vsh> ls | sort type -size
+```
+
+### Reverse a listing
+
+```
+vsh> ls | reverse
+vsh> ls | sort size | reverse
+```
+
+### First and last N items
+
+```
+vsh> ls | head 3
+vsh> ls | sort size | tail 5
+```
+
+---
+
+## Aggregation
+
+### Sum file sizes
+
+```
+vsh> ls | sum size
+vsh> ls | grep type=file | sum size
+```
+
+### Find largest and smallest files
+
+```
+vsh> ls | max size
+vsh> ls | min size
+vsh> ls | grep type=file | max size
+```
+
+### Group by type
+
+```
+vsh> ls | group type
+vsh> ls | group type | sort -count
+```
+
+---
+
+## Advanced Filtering with where
+
+### Numeric comparisons
+
+```
+vsh> ls | where size>1000
+vsh> ls | where size>=100 size<=10000
+```
+
+### Exact and negated match
+
+```
+vsh> ls | where type=file
+vsh> ls | where type!=dir
+```
+
+### Regex match
+
+```
+vsh> ls | where name~"\.py$"
+vsh> ls | where name~"^test"
+```
+
+### Combined conditions
+
+```
+vsh> ls | where type=file size>1000
+```
+
+---
+
+## Deduplication and Numbering
+
+### Remove duplicates by field
+
+```
+vsh> ls | uniq type
+```
+
+### Number results
+
+```
+vsh> ls | enumerate
+vsh> ls | sort -size | enumerate
+```
+
+---
+
+## Pipeline Composition
+
+### Top 3 largest files
+
+```
+vsh> ls | grep type=file | sort -size | head 3
+```
+
+### File type distribution sorted by count
+
+```
+vsh> ls | group type | sort -count
+```
+
+### Numbered list of files over 1KB
+
+```
+vsh> ls | where type=file size>1000 | sort -size | enumerate
+```
+
+### Sum of file sizes (excluding directories)
+
+```
+vsh> ls | grep type=file | sum size
+```

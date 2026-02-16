@@ -356,6 +356,175 @@ Foreach can run any pipeline per object, including nested pipelines with `|` (qu
 
 Missing fields are substituted as empty strings.
 
+### sort
+
+Sort input objects by one or more fields.
+
+**Syntax:** `sort [field ...] [-field ...]`
+
+```
+vsh> ls | sort name
+vsh> ls | sort -size
+vsh> ls | sort type -size
+```
+
+Prefix a field name with `-` for descending order. Numeric values are compared numerically. Multiple fields create a multi-key sort (first field is primary, second is tiebreaker, etc.).
+
+### head
+
+Take the first N input objects.
+
+**Syntax:** `head [N]`
+
+```
+vsh> ls | head
+vsh> ls | head 5
+vsh> ls | sort -size | head 3
+```
+
+Default is 10 when no argument is given.
+
+### tail
+
+Take the last N input objects.
+
+**Syntax:** `tail [N]`
+
+```
+vsh> ls | tail
+vsh> ls | tail 5
+vsh> ls | sort size | tail 3
+```
+
+Default is 10 when no argument is given.
+
+### uniq
+
+Remove duplicate objects.
+
+**Syntax:** `uniq [field ...]`
+
+```
+vsh> ls | uniq type
+vsh> ls | map type | uniq type
+```
+
+With field arguments, uniqueness is determined by the values of those fields only. Without arguments, the entire object is compared. Preserves the first occurrence.
+
+### reverse
+
+Reverse the order of input objects.
+
+**Syntax:** `reverse`
+
+```
+vsh> ls | reverse
+vsh> ls | sort size | reverse
+```
+
+Takes no arguments.
+
+### sum
+
+Sum a numeric field across all input objects.
+
+**Syntax:** `sum field`
+
+```
+vsh> ls | sum size
+vsh> ls | grep type=file | sum size
+```
+
+Requires exactly one field name. Non-numeric or missing values are treated as 0. Emits a single object with `{"sum": total}`.
+
+### min
+
+Find the object with the smallest value for a field.
+
+**Syntax:** `min field`
+
+```
+vsh> ls | min size
+vsh> ls | grep type=file | min size
+```
+
+Returns the full input object that has the smallest value for the given field. With empty input, returns nothing.
+
+### max
+
+Find the object with the largest value for a field.
+
+**Syntax:** `max field`
+
+```
+vsh> ls | max size
+vsh> ls | grep type=file | max size
+```
+
+Returns the full input object that has the largest value for the given field. With empty input, returns nothing.
+
+### where
+
+Filter objects using comparison operators.
+
+**Syntax:** `where condition [condition ...]`
+
+Supported operators:
+
+| Operator | Meaning | Example |
+|---|---|---|
+| `=` | Exact string match | `where type=file` |
+| `!=` | Not equal | `where type!=dir` |
+| `>` | Greater than | `where size>1000` |
+| `<` | Less than | `where size<100` |
+| `>=` | Greater or equal | `where size>=100` |
+| `<=` | Less or equal | `where size<=1000` |
+| `~` | Regex match | `where name~"\.py$"` |
+
+```
+vsh> ls | where size>1000
+vsh> ls | where type=file size>=100
+vsh> ls | where name~"\.py$"
+```
+
+Numeric comparisons are used when both sides are numeric; otherwise string comparison applies. Multiple conditions use AND logic.
+
+### group
+
+Group objects by a field and count occurrences.
+
+**Syntax:** `group field`
+
+```
+vsh> ls | group type
+TYPE  COUNT
+----  -----
+file  8
+dir   3
+
+vsh> ls | group type | sort -count
+```
+
+Requires exactly one field name. Emits one object per group with the field value and a `count` field.
+
+### enumerate
+
+Add a zero-based index field to each object.
+
+**Syntax:** `enumerate`
+
+```
+vsh> ls | enumerate
+INDEX  NAME        TYPE  SIZE
+-----  ----------  ----  ----
+0      flake.nix   file  820
+1      tests       dir   4096
+
+vsh> ls | sort -size | enumerate
+```
+
+Takes no arguments.
+
 ---
 
 ## Field Templates
