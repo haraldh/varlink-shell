@@ -610,7 +610,7 @@ The `{field}` template syntax is used by `map`, `filter_map`, and `foreach`.
 
 ### Syntax
 
-`{field}` references a field name from the input object. Field names are `\w+` (letters, digits, underscores).
+`{field}` references a field name from the input object. Field names are `\w+` (letters, digits, underscores). **Dotted paths** like `{context.ID}` traverse nested objects — `{a.b.c}` resolves to `obj["a"]["b"]["c"]`.
 
 ### Type behavior
 
@@ -628,6 +628,26 @@ The `{field}` template syntax is used by `map`, `filter_map`, and `foreach`.
 | `map` | Key omitted from output, object still emitted |
 | `filter_map` | Entire object dropped |
 | `foreach` | Replaced with empty string |
+
+### Nested objects (dotted paths)
+
+Dotted paths work everywhere a field name is accepted: `map`, `where`, `grep`, `sort`, `group`, `sum`, `min`, `max`, `uniq`, and `foreach`.
+
+```
+vsh> varlink unix:/run/systemd/io.systemd.Manager io.systemd.Unit.List | where context.Type=service runtime.ActiveState=active | map context.ID context.Description | head 5
+```
+
+In `map`, a bare dotted path like `context.ID` becomes the output key `context.ID`. Use renaming to flatten:
+
+```
+vsh> ... | map id={context.ID} state={runtime.ActiveState}
+```
+
+String interpolation also works with dotted paths:
+
+```
+vsh> ... | map label="{context.ID} ({runtime.ActiveState})"
+```
 
 ---
 

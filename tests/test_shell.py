@@ -9,6 +9,7 @@ import varlink
 
 from varlink_shell.shell import (
     _coerce_value,
+    _get_field,
     _parse_varlink_params,
     execute,
     parse,
@@ -1056,3 +1057,189 @@ class TestVarlinkSystemd:
             "io.systemd.Hostname.Describe")
         assert len(result) >= 1
         assert "Hostname" in result[0]
+
+
+# ---------------------------------------------------------------------------
+# _get_field unit tests
+# ---------------------------------------------------------------------------
+
+class TestGetField:
+    def test_simple(self):
+        assert _get_field({"a": 1}, "a") == 1
+
+    def test_nested(self):
+        assert _get_field({"ctx": {"ID": 42}}, "ctx.ID") == 42
+
+    def test_deep_nested(self):
+        assert _get_field({"a": {"b": {"c": "deep"}}}, "a.b.c") == "deep"
+
+    def test_missing_top(self):
+        assert _get_field({"a": 1}, "b") is None
+
+    def test_missing_nested(self):
+        assert _get_field({"a": {"b": 1}}, "a.c") is None
+
+    def test_missing_intermediate(self):
+        assert _get_field({"a": 1}, "a.b") is None
+
+    def test_non_dict_intermediate(self):
+        assert _get_field({"a": "string"}, "a.b") is None
+
+    def test_default(self):
+        assert _get_field({"a": 1}, "b", "fallback") == "fallback"
+
+    def test_default_nested(self):
+        assert _get_field({"a": {"b": 1}}, "a.c", 0) == 0
+
+    def test_non_dotted_unchanged(self):
+        assert _get_field({"name": "alice"}, "name") == "alice"
+
+    def test_nested_dict_value(self):
+        obj = {"ctx": {"meta": {"x": 1, "y": 2}}}
+        assert _get_field(obj, "ctx.meta") == {"x": 1, "y": 2}
+
+
+# ---------------------------------------------------------------------------
+# Dotted field path integration tests
+# ---------------------------------------------------------------------------
+
+# Helper to produce nested objects via jsexec
+_NESTED_DATA = [
+    {"context": {"ID": "sshd.service", "Type": "service"}, "runtime": {"ActiveState": "active", "Load": 50}},
+    {"context": {"ID": "cups.service", "Type": "service"}, "runtime": {"ActiveState": "inactive", "Load": 10}},
+    {"context": {"ID": "tmp.mount", "Type": "mount"}, "runtime": {"ActiveState": "active", "Load": 30}},
+]
+
+_NESTED_PROG = "import json; print(json.dumps(" + repr(_NESTED_DATA) + "))"
+
+
+class TestDottedPaths:
+    def test_map_dotted(self):
+        result = execute(f'jsexec {sys.executable} -c "{_NESTED_PROG}" | map context.ID context.Type')
+        assert len(result) == 3
+        assert result[0] == {"context.ID": "sshd.service", "context.Type": "service"}
+
+    def test_map_rename_dotted(self):
+        result = execute(f'jsexec {sys.executable} -c "{_NESTED_PROG}" | map id={{context.ID}} type={{context.Type}}')
+        assert result[0] == {"id": "sshd.service", "type": "service"}
+
+    def test_map_interpolation_dotted(self):
+        result = execute(
+            f'jsexec {sys.executable} -c "{_NESTED_PROG}" '
+            '| map label="{context.ID} ({context.Type})"')
+        assert result[0] == {"label": "sshd.service (service)"}
+
+    def test_where_dotted(self):
+        result = execute(
+            f'jsexec {sys.executable} -c "{_NESTED_PROG}" '
+            '| where context.Type=service')
+        assert len(result) == 2
+        assert all(r["context"]["Type"] == "service" for r in result)
+
+    def test_where_dotted_multiple(self):
+        result = execute(
+            f'jsexec {sys.executable} -c "{_NESTED_PROG}" '
+            '| where context.Type=service runtime.ActiveState=active')
+        assert len(result) == 1
+        assert result[0]["context"]["ID"] == "sshd.service"
+
+    def test_where_dotted_numeric(self):
+        result = execute(
+            f'jsexec {sys.executable} -c "{_NESTED_PROG}" '
+            '| where runtime.Load>20')
+        assert len(result) == 2
+
+    def test_grep_dotted(self):
+        result = execute(
+            f'jsexec {sys.executable} -c "{_NESTED_PROG}" '
+            '| grep context.ID=sshd')
+        assert len(result) == 1
+        assert result[0]["context"]["ID"] == "sshd.service"
+
+    def test_sort_dotted(self):
+        result = execute(
+            f'jsexec {sys.executable} -c "{_NESTED_PROG}" '
+            '| sort runtime.Load')
+        loads = [r["runtime"]["Load"] for r in result]
+        assert loads == [10, 30, 50]
+
+    def test_sort_dotted_descending(self):
+        result = execute(
+            f'jsexec {sys.executable} -c "{_NESTED_PROG}" '
+            '| sort -runtime.Load')
+        loads = [r["runtime"]["Load"] for r in result]
+        assert loads == [50, 30, 10]
+
+    def test_group_dotted(self):
+        result = execute(
+            f'jsexec {sys.executable} -c "{_NESTED_PROG}" '
+            '| group context.Type')
+        by_type = {o["context.Type"]: o["count"] for o in result}
+        assert by_type == {"service": 2, "mount": 1}
+
+    def test_sum_dotted(self):
+        result = execute(
+            f'jsexec {sys.executable} -c "{_NESTED_PROG}" '
+            '| sum runtime.Load')
+        assert result == [{"sum": 90}]
+
+    def test_min_dotted(self):
+        result = execute(
+            f'jsexec {sys.executable} -c "{_NESTED_PROG}" '
+            '| min runtime.Load')
+        assert result[0]["context"]["ID"] == "cups.service"
+
+    def test_max_dotted(self):
+        result = execute(
+            f'jsexec {sys.executable} -c "{_NESTED_PROG}" '
+            '| max runtime.Load')
+        assert result[0]["context"]["ID"] == "sshd.service"
+
+    def test_foreach_dotted(self):
+        prog = "import json; print(json.dumps([{'ctx': {'name': 'hello'}}]))"
+        result = execute(
+            f'jsexec {sys.executable} -c "{prog}" '
+            '| foreach echo val={ctx.name}')
+        assert result == [{"val": "hello"}]
+
+    def test_uniq_dotted(self):
+        result = execute(
+            f'jsexec {sys.executable} -c "{_NESTED_PROG}" '
+            '| uniq context.Type')
+        assert len(result) == 2  # service and mount
+
+    def test_pipeline_where_map_sort(self):
+        result = execute(
+            f'jsexec {sys.executable} -c "{_NESTED_PROG}" '
+            '| where context.Type=service '
+            '| map id={context.ID} load={runtime.Load} '
+            '| sort -load')
+        assert len(result) == 2
+        assert result[0] == {"id": "sshd.service", "load": 50}
+        assert result[1] == {"id": "cups.service", "load": 10}
+
+
+# ---------------------------------------------------------------------------
+# Systemd dotted path integration tests
+# ---------------------------------------------------------------------------
+
+_MANAGER_SOCKET = "/run/systemd/io.systemd.Manager"
+_has_manager_socket = os.path.exists(_MANAGER_SOCKET)
+
+
+@pytest.mark.skipif(
+    not _has_manager_socket,
+    reason=f"{_MANAGER_SOCKET} not available",
+)
+class TestDottedPathsSystemd:
+    def test_unit_list_where_map(self):
+        result = execute(
+            f"varlink unix:{_MANAGER_SOCKET} io.systemd.Unit.List "
+            "| where context.Type=service "
+            "| map context.ID context.Description runtime.ActiveState "
+            "| head 5")
+        assert len(result) <= 5
+        assert len(result) >= 1
+        for obj in result:
+            assert "context.ID" in obj
+            assert obj["context.ID"].endswith(".service")

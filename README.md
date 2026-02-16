@@ -75,6 +75,13 @@ Run a command per object with `foreach`:
 vsh> ls | grep type=file | foreach echo file={name}
 ```
 
+Work with nested objects using dotted paths (e.g. systemd varlink APIs):
+
+```
+vsh> varlink unix:/run/systemd/io.systemd.Manager io.systemd.Unit.List | where context.Type=service runtime.ActiveState=active | map context.ID context.Description | head 10
+vsh> varlink unix:/run/systemd/io.systemd.Manager io.systemd.Unit.List | map type={context.Type} | group type | sort -count
+```
+
 ## Commands
 
 | Command | Description |

@@ -27,7 +27,19 @@ service = varlink.Service(
 # Field interpolation helpers
 # ---------------------------------------------------------------------------
 
-_FIELD_RE = re.compile(r"\{(\w+)\}")
+_FIELD_RE = re.compile(r"\{([\w.]+)\}")
+
+
+def _get_field(obj, path, default=None):
+    """Get a field by dotted path: 'context.ID' -> obj['context']['ID']."""
+    for part in path.split("."):
+        if isinstance(obj, dict):
+            obj = obj.get(part)
+        else:
+            return default
+        if obj is None:
+            return default
+    return obj
 
 
 def _parse_mappings(args):
@@ -46,12 +58,12 @@ def _eval_template(tmpl, obj):
     """Evaluate template. Single {field} preserves raw type; mixed -> string."""
     m = _FIELD_RE.fullmatch(tmpl)
     if m:
-        return obj.get(m.group(1))          # raw value or None (missing)
+        return _get_field(obj, m.group(1))    # raw value or None (missing)
     has_ref = _FIELD_RE.search(tmpl)
     if not has_ref:
         return tmpl                          # literal string
     def repl(match):
-        return str(obj.get(match.group(1), ""))
+        return str(_get_field(obj, match.group(1), ""))
     return _FIELD_RE.sub(repl, tmpl)
 
 
@@ -157,7 +169,7 @@ class Builtins:
         matches = []
         if input:
             for obj in input:
-                if all(pattern in str(obj.get(field, "")) for field, pattern in filters):
+                if all(pattern in str(_get_field(obj, field, "")) for field, pattern in filters):
                     matches.append(obj)
 
         for i, obj in enumerate(matches):
@@ -297,7 +309,7 @@ class Builtins:
         if input:
             for obj in input:
                 line = _FIELD_RE.sub(
-                    lambda m: shlex.quote(str(obj.get(m.group(1), ""))), template)
+                    lambda m: shlex.quote(str(_get_field(obj, m.group(1), ""))), template)
                 all_results.extend(execute(line))
         for i, obj in enumerate(all_results):
             yield {"object": obj, "_continues": i < len(all_results) - 1}
@@ -320,7 +332,7 @@ class Builtins:
         def sort_key(obj):
             parts = []
             for field, desc in keys:
-                v = obj.get(field)
+                v = _get_field(obj, field)
                 try:
                     num = float(v)
                 except (TypeError, ValueError):
@@ -368,7 +380,7 @@ class Builtins:
         results = []
         for obj in (input or []):
             if args:
-                key = tuple(obj.get(f) for f in args)
+                key = tuple(_get_field(obj, f) for f in args)
             else:
                 key = json.dumps(obj, sort_keys=True)
             if key not in seen:
@@ -395,7 +407,7 @@ class Builtins:
         field = args[0]
         total = 0
         for obj in (input or []):
-            v = obj.get(field, 0)
+            v = _get_field(obj, field, 0)
             try:
                 total += float(v)
             except (TypeError, ValueError):
@@ -416,7 +428,7 @@ class Builtins:
             return
 
         def key_fn(obj):
-            v = obj.get(field)
+            v = _get_field(obj, field)
             try:
                 return (0, float(v))
             except (TypeError, ValueError):
@@ -437,7 +449,7 @@ class Builtins:
             return
 
         def key_fn(obj):
-            v = obj.get(field)
+            v = _get_field(obj, field)
             try:
                 return (0, float(v))
             except (TypeError, ValueError):
@@ -474,7 +486,7 @@ class Builtins:
 
         def matches(obj):
             for field, op, value in conditions:
-                actual = obj.get(field)
+                actual = _get_field(obj, field)
                 if actual is None:
                     return False
                 if op == "~":
@@ -517,7 +529,7 @@ class Builtins:
         field = args[0]
         counts = collections.OrderedDict()
         for obj in (input or []):
-            key = obj.get(field)
+            key = _get_field(obj, field)
             counts[key] = counts.get(key, 0) + 1
 
         results = [{field: k, "count": v} for k, v in counts.items()]
@@ -819,7 +831,7 @@ def pretty_print(objects):
 
 def _print_table(objects, keys):
     headers = [k.upper() for k in keys]
-    rows = [[str(obj.get(k, "")) for k in keys] for obj in objects]
+    rows = [[str(_get_field(obj, k, "")) for k in keys] for obj in objects]
 
     widths = [
         max(len(h), *(len(r[i]) for r in rows))
