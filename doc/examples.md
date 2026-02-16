@@ -241,6 +241,17 @@ vsh> echo name=sshd.service | varlink unix:/run/systemd/io.systemd.Manager Descr
 vsh> varlink unix:/run/systemd/io.systemd.resolve ResolveHostname name=google.com family=2
 ```
 
+### Nested objects with dotted paths
+
+Systemd's varlink APIs return nested objects. Use dotted paths to reach into them:
+
+```
+vsh> varlink unix:/run/systemd/io.systemd.Manager io.systemd.Unit.List | where context.Type=service runtime.ActiveState=active | map context.ID context.Description | head 10
+vsh> varlink unix:/run/systemd/io.systemd.Manager io.systemd.Unit.List | where context.Type=service | map id={context.ID} state={runtime.ActiveState} | head 5
+vsh> varlink unix:/run/systemd/io.systemd.Manager io.systemd.Unit.List | map type={context.Type} | group type | sort -count
+vsh> varlink unix:/run/systemd/io.systemd.Manager io.systemd.Unit.List | where context.Type=service | sort context.ID | map context.ID runtime.ActiveState
+```
+
 ---
 
 ## Combining Patterns
