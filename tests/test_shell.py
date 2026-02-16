@@ -1,9 +1,19 @@
 import json
+import os
 import sys
+import tempfile
+import threading
 
 import pytest
+import varlink
 
-from varlink_shell.shell import execute, parse, service
+from varlink_shell.shell import (
+    _coerce_value,
+    _parse_varlink_params,
+    execute,
+    parse,
+    service,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -752,5 +762,279 @@ class TestPipelineComposition:
         result = execute("help")
         commands = {obj["command"] for obj in result}
         for cmd in ["sort", "head", "tail", "uniq", "reverse",
-                     "sum", "min", "max", "where", "group", "enumerate"]:
+                     "sum", "min", "max", "where", "group", "enumerate",
+                     "varlink"]:
             assert cmd in commands
+
+
+# ---------------------------------------------------------------------------
+# _coerce_value tests
+# ---------------------------------------------------------------------------
+
+class TestCoerceValue:
+    def test_int(self):
+        assert _coerce_value("42") == 42
+        assert isinstance(_coerce_value("42"), int)
+
+    def test_negative_int(self):
+        assert _coerce_value("-7") == -7
+
+    def test_float(self):
+        assert _coerce_value("3.14") == 3.14
+        assert isinstance(_coerce_value("3.14"), float)
+
+    def test_bool_true(self):
+        assert _coerce_value("true") is True
+
+    def test_bool_false(self):
+        assert _coerce_value("false") is False
+
+    def test_json_object(self):
+        assert _coerce_value('{"a":1}') == {"a": 1}
+
+    def test_json_array(self):
+        assert _coerce_value('[1,2,3]') == [1, 2, 3]
+
+    def test_string(self):
+        assert _coerce_value("hello") == "hello"
+        assert isinstance(_coerce_value("hello"), str)
+
+    def test_string_not_bool(self):
+        assert _coerce_value("True") == "True"  # uppercase, not coerced
+        assert _coerce_value("FALSE") == "FALSE"
+
+    def test_invalid_json_stays_string(self):
+        assert _coerce_value("{bad json") == "{bad json"
+
+    def test_zero(self):
+        assert _coerce_value("0") == 0
+        assert isinstance(_coerce_value("0"), int)
+
+
+# ---------------------------------------------------------------------------
+# _parse_varlink_params tests
+# ---------------------------------------------------------------------------
+
+class TestParseVarlinkParams:
+    def test_basic(self):
+        result = _parse_varlink_params(["name=google.com", "family=2"])
+        assert result == {"name": "google.com", "family": 2}
+
+    def test_bool_values(self):
+        result = _parse_varlink_params(["verbose=true", "quiet=false"])
+        assert result == {"verbose": True, "quiet": False}
+
+    def test_empty(self):
+        assert _parse_varlink_params([]) == {}
+
+    def test_json_value(self):
+        result = _parse_varlink_params(['data={"key":"val"}'])
+        assert result == {"data": {"key": "val"}}
+
+    def test_value_with_equals(self):
+        result = _parse_varlink_params(["expr=a=b"])
+        assert result == {"expr": "a=b"}
+
+
+# ---------------------------------------------------------------------------
+# Mock varlink server for testing varlink builtin
+# ---------------------------------------------------------------------------
+
+_TEST_IFACE = """\
+interface org.test.echo
+
+method Describe() -> (name: string, version: int)
+
+method Echo(message: string) -> (reply: string)
+
+method Add(a: int, b: int) -> (sum: int)
+
+error NotImplemented ()
+"""
+
+
+class _TestRequestHandler(varlink.RequestHandler):
+    service = None  # set by fixture
+
+
+class _TestImpl:
+    def Describe(self):
+        return {"name": "test-echo", "version": 1}
+
+    def Echo(self, message):
+        return {"reply": message}
+
+    def Add(self, a, b):
+        return {"sum": a + b}
+
+
+@pytest.fixture()
+def mock_varlink_server():
+    """Start a varlink ThreadingServer on a temp Unix socket, yield address."""
+    tmpdir = tempfile.mkdtemp()
+    sock_path = os.path.join(tmpdir, "test.sock")
+    address = f"unix:{sock_path}"
+
+    # Write the interface definition to a temp file
+    iface_path = os.path.join(tmpdir, "org.test.echo.varlink")
+    with open(iface_path, "w") as f:
+        f.write(_TEST_IFACE)
+
+    test_service = varlink.Service(
+        vendor="test",
+        product="test",
+        version="0.1",
+        url="https://test",
+        interface_dir=tmpdir,
+    )
+    test_service._add_interface("org.test.echo", _TestImpl())
+
+    class Handler(varlink.RequestHandler):
+        service = test_service
+
+    server = varlink.ThreadingServer(address, Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    yield address
+
+    server.shutdown()
+    try:
+        os.unlink(sock_path)
+        os.unlink(iface_path)
+        os.rmdir(tmpdir)
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Varlink builtin tests (with mock server)
+# ---------------------------------------------------------------------------
+
+class TestVarlinkBuiltin:
+    def test_introspect(self, mock_varlink_server):
+        result = execute(f"varlink {mock_varlink_server}")
+        methods = {obj["method"] for obj in result}
+        assert "Describe" in methods
+        assert "Echo" in methods
+        assert "Add" in methods
+        for obj in result:
+            assert obj["interface"] == "org.test.echo"
+            assert "signature" in obj
+
+    def test_call_no_params(self, mock_varlink_server):
+        result = execute(f"varlink {mock_varlink_server} Describe")
+        assert len(result) == 1
+        assert result[0]["name"] == "test-echo"
+        assert result[0]["version"] == 1
+
+    def test_call_with_params(self, mock_varlink_server):
+        result = execute(f"varlink {mock_varlink_server} Echo message=hello")
+        assert len(result) == 1
+        assert result[0]["reply"] == "hello"
+
+    def test_call_with_typed_params(self, mock_varlink_server):
+        result = execute(f"varlink {mock_varlink_server} Add a=3 b=4")
+        assert len(result) == 1
+        assert result[0]["sum"] == 7
+
+    def test_call_fully_qualified(self, mock_varlink_server):
+        result = execute(
+            f"varlink {mock_varlink_server} org.test.echo.Describe")
+        assert len(result) == 1
+        assert result[0]["name"] == "test-echo"
+
+    def test_pipeline_with_map(self, mock_varlink_server):
+        result = execute(
+            f"varlink {mock_varlink_server} Describe | map name")
+        assert result == [{"name": "test-echo"}]
+
+    def test_piped_input(self, mock_varlink_server):
+        result = execute(
+            f"echo message=world | varlink {mock_varlink_server} Echo")
+        assert len(result) == 1
+        assert result[0]["reply"] == "world"
+
+    def test_connection_failed(self):
+        with pytest.raises(RuntimeError, match="VarlinkConnectionFailed"):
+            execute("varlink unix:/nonexistent/socket.sock Describe")
+
+    def test_method_not_found(self, mock_varlink_server):
+        with pytest.raises(RuntimeError, match="VarlinkMethodNotFound"):
+            execute(f"varlink {mock_varlink_server} NoSuchMethod")
+
+    def test_fully_qualified_method_not_found(self, mock_varlink_server):
+        with pytest.raises(RuntimeError, match="VarlinkCallFailed"):
+            execute(
+                f"varlink {mock_varlink_server} org.test.echo.NoSuchMethod")
+
+    def test_no_args_error(self):
+        with pytest.raises(RuntimeError, match="InvalidParameter"):
+            execute("varlink")
+
+    def test_help_varlink(self):
+        result = execute("help varlink")
+        assert len(result) >= 1
+        assert result[0]["command"] == "varlink"
+        assert "external varlink service" in result[0]["description"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Varlink builtin wire-format tests
+# ---------------------------------------------------------------------------
+
+class TestVarlinkWireFormat(TestWireFormat):
+    def test_introspect_wire(self, mock_varlink_server):
+        replies = self._call("Varlink", {"args": [mock_varlink_server]})
+        assert len(replies) >= 1
+        # Last reply should not continue
+        assert replies[-1].get("continues", False) is False
+        # All replies have "object" wrapper
+        for r in replies:
+            obj = r["parameters"]["object"]
+            assert "interface" in obj
+            assert "method" in obj
+
+    def test_call_wire(self, mock_varlink_server):
+        replies = self._call("Varlink", {
+            "args": [mock_varlink_server, "Describe"],
+        })
+        assert len(replies) == 1
+        assert replies[0]["parameters"]["object"]["name"] == "test-echo"
+
+
+# ---------------------------------------------------------------------------
+# Systemd integration tests (skipped if socket not available)
+# ---------------------------------------------------------------------------
+
+_HOSTNAME_SOCKET = "/run/systemd/io.systemd.Hostname"
+_has_hostname_socket = os.path.exists(_HOSTNAME_SOCKET)
+
+
+@pytest.mark.skipif(
+    not _has_hostname_socket,
+    reason=f"{_HOSTNAME_SOCKET} not available",
+)
+class TestVarlinkSystemd:
+    def test_introspect_hostname(self):
+        result = execute(f"varlink unix:{_HOSTNAME_SOCKET}")
+        methods = {obj["method"] for obj in result}
+        assert "Describe" in methods
+
+    def test_describe_hostname(self):
+        result = execute(f"varlink unix:{_HOSTNAME_SOCKET} Describe")
+        assert len(result) >= 1
+        assert "Hostname" in result[0]
+
+    def test_describe_pipeline(self):
+        result = execute(
+            f"varlink unix:{_HOSTNAME_SOCKET} Describe | map Hostname")
+        assert len(result) == 1
+        assert "Hostname" in result[0]
+
+    def test_fully_qualified_method(self):
+        result = execute(
+            f"varlink unix:{_HOSTNAME_SOCKET} "
+            "io.systemd.Hostname.Describe")
+        assert len(result) >= 1
+        assert "Hostname" in result[0]

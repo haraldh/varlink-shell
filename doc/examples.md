@@ -205,6 +205,44 @@ vsh> jsexec echo '[{"name":"a"},{"name":"b"},{"name":"c"}]' | foreach echo file=
 
 ---
 
+## Systemd via Varlink
+
+Query systemd services directly through their varlink sockets — no JSON parsing needed.
+
+### Hostname and system info
+
+```
+vsh> varlink unix:/run/systemd/io.systemd.Hostname Describe
+vsh> varlink unix:/run/systemd/io.systemd.Hostname Describe | map Hostname KernelRelease OperatingSystemPrettyName
+```
+
+### Introspect available methods
+
+```
+vsh> varlink unix:/run/systemd/io.systemd.Hostname
+vsh> varlink unix:/run/systemd/io.systemd.Manager
+```
+
+### Fully-qualified method call
+
+```
+vsh> varlink unix:/run/systemd/io.systemd.Manager io.systemd.Unit.List
+```
+
+### Piped parameters
+
+```
+vsh> echo name=sshd.service | varlink unix:/run/systemd/io.systemd.Manager Describe
+```
+
+### Resolve DNS names
+
+```
+vsh> varlink unix:/run/systemd/io.systemd.resolve ResolveHostname name=google.com family=2
+```
+
+---
+
 ## Combining Patterns
 
 ### Count filtered results

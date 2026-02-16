@@ -525,6 +525,63 @@ vsh> ls | sort -size | enumerate
 
 Takes no arguments.
 
+### varlink
+
+Connect to an external varlink service and call methods.
+
+**Syntax:** `varlink address [method] [key=value ...]`
+
+The first argument is a varlink address (`unix:/path` or `tcp:host:port`).
+
+**Introspect mode** — list all methods on a service:
+
+```
+vsh> varlink unix:/run/systemd/io.systemd.Hostname
+INTERFACE              METHOD    SIGNATURE
+---------------------  --------  -----------------------------------------
+io.systemd.Hostname    Describe  () -> (Hostname: string, ...)
+```
+
+**Call mode** — invoke a method and stream results as objects:
+
+```
+vsh> varlink unix:/run/systemd/io.systemd.Hostname Describe
+HOSTNAME      KERNELRELEASE  ...
+------------  -------------  ---
+my-machine    6.12.69        ...
+
+vsh> varlink unix:/run/systemd/io.systemd.Hostname Describe | map Hostname
+HOSTNAME
+--------
+my-machine
+```
+
+**Parameters** — pass as key=value with smart type coercion (42→int, true→bool, JSON objects detected automatically):
+
+```
+vsh> varlink unix:/run/systemd/io.systemd.resolve ResolveHostname name=google.com family=2
+```
+
+**Fully-qualified method names** — specify the interface explicitly:
+
+```
+vsh> varlink unix:/run/systemd/io.systemd.Manager io.systemd.Unit.List
+```
+
+**Piped input** — when no key=value args are given, each input object is used as call parameters:
+
+```
+vsh> echo name=sshd.service | varlink unix:/run/systemd/io.systemd.Manager Describe
+```
+
+**Auto-discovery:** Unqualified method names (like `Describe`) are resolved by introspecting all interfaces on the service. If the method name is ambiguous (exists in multiple interfaces), an error is raised.
+
+**Errors:**
+
+- `VarlinkConnectionFailed` — cannot connect to the address
+- `VarlinkCallFailed` — the remote method returned an error
+- `VarlinkMethodNotFound` — the method doesn't exist on any interface
+
 ---
 
 ## Field Templates

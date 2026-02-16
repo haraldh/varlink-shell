@@ -244,3 +244,31 @@ method Group(args: []string, input: ?[]object) -> (object: object)
 #   ls | enumerate
 #   ls | sort -size | enumerate
 method Enumerate(input: ?[]object) -> (object: object)
+
+# Connect to an external varlink service and call methods
+#
+# First argument is a varlink address (unix:/path or tcp:host:port).
+# Without a method name, lists all available methods on the service
+# as objects with interface, method, and signature fields.
+#
+# With a method name, calls that method and streams the results.
+# Unqualified names are auto-discovered by introspecting all interfaces.
+# Fully-qualified names (org.example.Service.Method) are used directly.
+# Parameters are passed as key=value pairs with smart type coercion
+# (integers, floats, booleans, JSON objects are detected automatically).
+#
+# When receiving piped input and no key=value args are given, each
+# input object is used as call parameters (one call per object).
+#
+# Examples:
+#   varlink unix:/run/systemd/io.systemd.Hostname
+#   varlink unix:/run/systemd/io.systemd.Hostname Describe
+#   varlink unix:/run/systemd/io.systemd.Hostname Describe | map Hostname
+#   varlink unix:/run/systemd/io.systemd.resolve ResolveHostname name=google.com family=2
+#   varlink unix:/run/systemd/io.systemd.Manager io.systemd.Unit.List
+#   echo name=sshd.service | varlink unix:/run/systemd/io.systemd.Manager Describe
+method Varlink(args: []string, input: ?[]object) -> (object: object)
+
+error VarlinkConnectionFailed (address: string, message: string)
+error VarlinkCallFailed (method: string, error: string, parameters: object)
+error VarlinkMethodNotFound (method: string, address: string)

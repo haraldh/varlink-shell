@@ -60,6 +60,37 @@ def _template_fields(tmpl):
     return set(_FIELD_RE.findall(tmpl))
 
 
+def _coerce_value(s):
+    """Coerce a string to int, float, bool, JSON, or leave as str."""
+    try:
+        return int(s)
+    except ValueError:
+        pass
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    if s == "true":
+        return True
+    if s == "false":
+        return False
+    if s.startswith(("{", "[")):
+        try:
+            return json.loads(s)
+        except json.JSONDecodeError:
+            pass
+    return s
+
+
+def _parse_varlink_params(kv_args):
+    """Parse key=value args, coercing values. Return dict."""
+    params = {}
+    for arg in kv_args:
+        k, v = arg.split("=", 1)
+        params[k] = _coerce_value(v)
+    return params
+
+
 def _method_name(cmd):
     """Convert command name to method name: 'filter_map' -> 'FilterMap'."""
     return "".join(part.capitalize() for part in cmd.split("_"))
@@ -503,6 +534,176 @@ class Builtins:
             out = {"index": i}
             out.update(obj)
             yield {"object": out, "_continues": i < len(items) - 1}
+
+    def Varlink(self, args, input=None, _more=True):
+        if not args:
+            raise varlink.VarlinkError({
+                "error": "org.varlink.service.InvalidParameter",
+                "parameters": {"parameter": "args"},
+            })
+
+        address = args[0]
+
+        # Separate method arg from key=value params
+        method_arg = None
+        kv_args = []
+        for arg in args[1:]:
+            if "=" in arg:
+                kv_args.append(arg)
+            elif method_arg is None:
+                method_arg = arg
+            else:
+                kv_args.append(arg)
+
+        try:
+            client = varlink.Client.new_with_address(address)
+        except (OSError, ConnectionError) as e:
+            raise varlink.VarlinkError({
+                "error": "sh.builtin.VarlinkConnectionFailed",
+                "parameters": {"address": address, "message": str(e)},
+            })
+
+        try:
+            if method_arg is None:
+                # Introspect mode: list all methods
+                results = []
+                with client.open("org.varlink.service") as con:
+                    info = con.GetInfo()
+                    iface_names = info.get("interfaces") or info.get("Interfaces") or []
+                for iface_name in iface_names:
+                    if iface_name == "org.varlink.service":
+                        continue
+                    with client.open("org.varlink.service") as con:
+                        desc_reply = con.GetInterfaceDescription(interface=iface_name)
+                        desc_text = desc_reply.get("description") or desc_reply.get("Description") or ""
+                    iface = varlink.Interface(desc_text)
+                    for name, member in iface.members.items():
+                        if isinstance(member, _Method):
+                            results.append({
+                                "interface": iface_name,
+                                "method": name,
+                                "signature": member.signature,
+                            })
+                if not results:
+                    return
+                for i, obj in enumerate(results):
+                    yield {"object": obj, "_continues": i < len(results) - 1}
+            else:
+                # Call mode: resolve interface and invoke method
+                if "." in method_arg:
+                    # Fully-qualified: split on last dot
+                    last_dot = method_arg.rfind(".")
+                    iface_name = method_arg[:last_dot]
+                    method_name = method_arg[last_dot + 1:]
+                else:
+                    # Auto-discover: find which interface has this method
+                    method_name = method_arg
+                    iface_name = self._resolve_method(client, method_name, address)
+
+                params = _parse_varlink_params(kv_args) if kv_args else {}
+
+                # If piped input and no kv params, each input object becomes call params
+                if input and not kv_args:
+                    results = []
+                    for obj in input:
+                        results.extend(
+                            self._varlink_call(client, iface_name, method_name, obj))
+                else:
+                    results = self._varlink_call(client, iface_name, method_name, params)
+
+                if not results:
+                    return
+                for i, obj in enumerate(results):
+                    yield {"object": obj, "_continues": i < len(results) - 1}
+        except OSError as e:
+            raise varlink.VarlinkError({
+                "error": "sh.builtin.VarlinkConnectionFailed",
+                "parameters": {"address": address, "message": str(e)},
+            })
+        finally:
+            client.cleanup()
+
+    @staticmethod
+    def _resolve_method(client, method_name, address):
+        """Auto-discover which interface contains the given method name."""
+        with client.open("org.varlink.service") as con:
+            info = con.GetInfo()
+            iface_names = info.get("interfaces") or info.get("Interfaces") or []
+
+        candidates = []
+        for iface_name in iface_names:
+            if iface_name == "org.varlink.service":
+                continue
+            with client.open("org.varlink.service") as con:
+                desc_reply = con.GetInterfaceDescription(interface=iface_name)
+                desc_text = desc_reply.get("description") or desc_reply.get("Description") or ""
+            iface = varlink.Interface(desc_text)
+            for name, member in iface.members.items():
+                if isinstance(member, _Method) and name == method_name:
+                    candidates.append(iface_name)
+                    break
+
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) == 0:
+            raise varlink.VarlinkError({
+                "error": "sh.builtin.VarlinkMethodNotFound",
+                "parameters": {"method": method_name, "address": address},
+            })
+        # Ambiguous — list candidates in the error
+        raise varlink.VarlinkError({
+            "error": "sh.builtin.VarlinkMethodNotFound",
+            "parameters": {
+                "method": method_name,
+                "address": address,
+            },
+        })
+
+    @staticmethod
+    def _varlink_call(client, iface_name, method_name, params):
+        """Call a varlink method and return list of result dicts."""
+        results = []
+        try:
+            with client.open(iface_name) as con:
+                try:
+                    method_fn = getattr(con, method_name)
+                except AttributeError:
+                    raise varlink.VarlinkError({
+                        "error": "sh.builtin.VarlinkCallFailed",
+                        "parameters": {
+                            "method": f"{iface_name}.{method_name}",
+                            "error": "org.varlink.service.MethodNotFound",
+                            "parameters": {"method": method_name},
+                        },
+                    })
+                for reply in method_fn(_more=True, **params):
+                    if isinstance(reply, dict):
+                        results.append(reply)
+                    else:
+                        # SimpleNamespace — convert to dict
+                        results.append(vars(reply))
+        except varlink.VarlinkError as e:
+            if e.error().startswith("sh.builtin."):
+                raise
+            if e.error() == "org.varlink.service.ExpectedMore":
+                # Method doesn't support streaming, retry without _more
+                with client.open(iface_name) as con:
+                    method_fn = getattr(con, method_name)
+                    reply = method_fn(**params)
+                    if isinstance(reply, dict):
+                        results.append(reply)
+                    else:
+                        results.append(vars(reply))
+            else:
+                raise varlink.VarlinkError({
+                    "error": "sh.builtin.VarlinkCallFailed",
+                    "parameters": {
+                        "method": f"{iface_name}.{method_name}",
+                        "error": e.error(),
+                        "parameters": e.parameters(),
+                    },
+                })
+        return results
 
 
 # ---------------------------------------------------------------------------
