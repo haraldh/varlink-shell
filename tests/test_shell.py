@@ -1,4 +1,5 @@
 import json
+import sys
 
 import pytest
 
@@ -88,6 +89,12 @@ class TestExecution:
         for obj in result:
             assert "description" in obj
 
+    def test_help_single_command(self):
+        result = execute("help grep")
+        assert len(result) == 1
+        assert result[0]["command"] == "grep"
+        assert result[0]["description"] != ""
+
     def test_help_pipe_count(self):
         result = execute("help | count")
         assert result[0]["count"] >= 4
@@ -176,3 +183,208 @@ class TestWireFormat:
         })
         assert len(replies) == 1
         assert replies[0]["parameters"] == {"count": 2}
+
+    def test_jsexec_wire(self):
+        replies = self._call("Jsexec", {
+            "args": [sys.executable, "-c",
+                     "import json; print(json.dumps({'a': 1}))"],
+        })
+        assert len(replies) == 1
+        assert replies[0]["parameters"]["object"] == {"a": 1}
+        assert replies[0].get("continues", False) is False
+
+
+# ---------------------------------------------------------------------------
+# Jsexec tests
+# ---------------------------------------------------------------------------
+
+class TestJsexec:
+    def test_single_object(self):
+        result = execute(
+            f"jsexec {sys.executable} -c "
+            "\"import json; print(json.dumps({'a': 1, 'b': 2}))\"")
+        assert result == [{"a": 1, "b": 2}]
+
+    def test_array_output(self):
+        result = execute(
+            f"jsexec {sys.executable} -c "
+            "\"import json; print(json.dumps([{'x': 1}, {'x': 2}]))\"")
+        assert result == [{"x": 1}, {"x": 2}]
+
+    def test_auto_unwrap_single_key_list(self):
+        result = execute(
+            f"jsexec {sys.executable} -c "
+            "\"import json; print(json.dumps({'items': [{'n': 1}, {'n': 2}]}))\"")
+        assert result == [{"n": 1}, {"n": 2}]
+
+    def test_non_dict_elements_wrapped(self):
+        result = execute(
+            f"jsexec {sys.executable} -c "
+            "\"import json; print(json.dumps([1, 'hello']))\"")
+        assert result == [{"value": 1}, {"value": "hello"}]
+
+    def test_pipeline_with_grep(self):
+        result = execute(
+            f"jsexec {sys.executable} -c "
+            "\"import json; print(json.dumps([{'color': 'red'}, {'color': 'blue'}]))\" "
+            "| grep color=red")
+        assert result == [{"color": "red"}]
+
+    def test_error_no_args(self):
+        with pytest.raises(RuntimeError, match="InvalidParameter"):
+            execute("jsexec")
+
+    def test_error_nonzero_exit(self):
+        with pytest.raises(RuntimeError, match="ExecFailed"):
+            execute(f"jsexec {sys.executable} -c \"raise SystemExit(1)\"")
+
+    def test_error_invalid_json(self):
+        with pytest.raises(RuntimeError, match="InvalidJson"):
+            execute(f"jsexec {sys.executable} -c \"print('not json')\"")
+
+    def test_dict_multi_key_not_unwrapped(self):
+        result = execute(
+            f"jsexec {sys.executable} -c "
+            "\"import json; print(json.dumps({'a': [1], 'b': [2]}))\"")
+        assert result == [{"a": [1], "b": [2]}]
+
+
+# ---------------------------------------------------------------------------
+# Map tests
+# ---------------------------------------------------------------------------
+
+class TestMap:
+    def test_projection(self):
+        result = execute("echo a=1 b=2 c=3 | map a c")
+        assert result == [{"a": "1", "c": "3"}]
+
+    def test_rename(self):
+        result = execute("echo x=1 | map y={x}")
+        assert result == [{"y": "1"}]
+
+    def test_interpolation(self):
+        result = execute('echo name=bob age=30 | map label="{name} is {age}"')
+        assert result == [{"label": "bob is 30"}]
+
+    def test_type_preservation(self):
+        result = execute(
+            f"jsexec {sys.executable} -c "
+            "\"import json; print(json.dumps({'a': 42, 'b': 'hello'}))\" "
+            "| map val={a}")
+        assert result == [{"val": 42}]
+
+    def test_missing_field_omitted(self):
+        result = execute("echo a=1 | map a b")
+        assert result == [{"a": "1"}]
+
+    def test_no_args_error(self):
+        with pytest.raises(RuntimeError, match="InvalidParameter"):
+            execute("echo a=1 | map")
+
+    def test_no_input_empty(self):
+        result = execute("map a")
+        assert result == []
+
+    def test_multiple_objects(self):
+        result = execute(
+            f"jsexec {sys.executable} -c "
+            "\"import json; print(json.dumps([{'x': 1, 'y': 2}, {'x': 3, 'y': 4}]))\" "
+            "| map x")
+        assert result == [{"x": 1}, {"x": 3}]
+
+
+# ---------------------------------------------------------------------------
+# FilterMap tests
+# ---------------------------------------------------------------------------
+
+class TestFilterMap:
+    def test_all_fields_present(self):
+        result = execute("echo a=1 b=2 | filter_map a b")
+        assert result == [{"a": "1", "b": "2"}]
+
+    def test_missing_field_drops_object(self):
+        result = execute("echo a=1 | filter_map a b")
+        assert result == []
+
+    def test_mixed_some_pass_some_dropped(self):
+        prog = "import json; print(json.dumps([{'x': 1, 'y': 2}, {'x': 3}]))"
+        result = execute(
+            f'jsexec {sys.executable} -c "{prog}" '
+            "| filter_map x y")
+        assert result == [{"x": 1, "y": 2}]
+
+    def test_rename(self):
+        result = execute("echo a=1 b=2 | filter_map c={a} d={b}")
+        assert result == [{"c": "1", "d": "2"}]
+
+    def test_no_args_error(self):
+        with pytest.raises(RuntimeError, match="InvalidParameter"):
+            execute("echo a=1 | filter_map")
+
+    def test_no_input_empty(self):
+        result = execute("filter_map a")
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Foreach tests
+# ---------------------------------------------------------------------------
+
+class TestForeach:
+    def test_simple_command(self):
+        result = execute("echo a=1 b=2 | foreach echo x={a}")
+        assert result == [{"x": "1"}]
+
+    def test_multiple_inputs(self):
+        prog = """import json; print(json.dumps([{'n': 'a'}, {'n': 'b'}]))"""
+        result = execute(
+            f'jsexec {sys.executable} -c "{prog}" '
+            "| foreach echo val={n}")
+        assert result == [{"val": "a"}, {"val": "b"}]
+
+    def test_sub_pipeline(self):
+        result = execute(
+            'echo a=hello | foreach "echo x={a} | grep x=hello"')
+        assert result == [{"x": "hello"}]
+
+    def test_no_args_error(self):
+        with pytest.raises(RuntimeError, match="InvalidParameter"):
+            execute("echo a=1 | foreach")
+
+    def test_no_input_empty(self):
+        result = execute("foreach echo x=1")
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Wire-format tests for Map and Foreach
+# ---------------------------------------------------------------------------
+
+class TestWireFormatMapForeach(TestWireFormat):
+    def test_map_wire(self):
+        replies = self._call("Map", {
+            "args": ["x", "y"],
+            "input": [{"x": 1, "y": 2, "z": 3}],
+        })
+        assert len(replies) == 1
+        assert replies[0]["parameters"]["object"] == {"x": 1, "y": 2}
+
+    def test_map_wire_empty_input(self):
+        replies = self._call("Map", {"args": ["x"]})
+        assert len(replies) == 0
+
+    def test_foreach_wire(self):
+        replies = self._call("Foreach", {
+            "args": ["echo", "v={a}"],
+            "input": [{"a": "hello"}],
+        })
+        assert len(replies) == 1
+        assert replies[0]["parameters"]["object"] == {"v": "hello"}
+
+    def test_filter_map_wire(self):
+        replies = self._call("FilterMap", {
+            "args": ["a"],
+            "input": [{"a": 1, "b": 2}, {"b": 3}],
+        })
+        assert len(replies) == 1
+        assert replies[0]["parameters"]["object"] == {"a": 1}

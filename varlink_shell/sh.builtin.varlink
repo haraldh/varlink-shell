@@ -13,4 +13,16 @@ method Count(input: ?[]object) -> (count: int)
 method Grep(args: []string, input: ?[]object) -> (object: object)
 
 # Show available commands and their descriptions
-method Help() -> (command: string, description: string)
+method Help(command: ?string) -> (command: string, description: string)
+
+# Execute an external command and parse its JSON output as objects
+method Jsexec(args: []string) -> (object: object)
+
+# Transform input objects by selecting, renaming, or interpolating fields
+method Map(args: []string, input: ?[]object) -> (object: object)
+
+# Like Map, but drop objects where any referenced field is missing
+method FilterMap(args: []string, input: ?[]object) -> (object: object)
+
+# Run a command for each input object with {field} substitution
+method Foreach(args: []string, input: ?[]object) -> (object: object)
