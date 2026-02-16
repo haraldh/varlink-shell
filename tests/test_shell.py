@@ -727,6 +727,24 @@ class TestEnumerate:
 
 
 # ---------------------------------------------------------------------------
+# Print tests
+# ---------------------------------------------------------------------------
+
+class TestPrint:
+    def test_passthrough(self):
+        result = execute("echo a=1 b=2 | print")
+        assert result == [{"a": "1", "b": "2"}]
+
+    def test_mid_pipeline(self):
+        result = execute("echo a=1 | print | count")
+        assert result == [{"count": 1}]
+
+    def test_empty(self):
+        result = execute("print")
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
 # Integration / pipeline composition tests
 # ---------------------------------------------------------------------------
 

@@ -525,6 +525,26 @@ vsh> ls | sort -size | enumerate
 
 Takes no arguments.
 
+### print
+
+Pretty-print input objects as a table and pass them through.
+
+**Syntax:** `print`
+
+```
+vsh> ls | sort -size | print
+vsh> ls | print | count
+```
+
+In interactive mode, the shell always pretty-prints the final result, so `print` is most useful mid-pipeline to inspect intermediate values.
+
+In non-interactive mode (piped stdin), the shell outputs JSON by default — one object per line. Ending a pipeline with `| print` switches to table output instead:
+
+```bash
+echo 'ls /tmp' | python -m varlink_shell              # JSON lines
+echo 'ls /tmp | print' | python -m varlink_shell       # table
+```
+
 ### varlink
 
 Connect to an external varlink service and call methods.

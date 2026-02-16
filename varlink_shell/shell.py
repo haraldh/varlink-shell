@@ -535,6 +535,14 @@ class Builtins:
             out.update(obj)
             yield {"object": out, "_continues": i < len(items) - 1}
 
+    def Print(self, input=None, _more=True):
+        items = list(input or [])
+        pretty_print(items)
+        if not items:
+            return
+        for i, obj in enumerate(items):
+            yield {"object": obj, "_continues": i < len(items) - 1}
+
     def Varlink(self, args, input=None, _more=True):
         if not args:
             raise varlink.VarlinkError({

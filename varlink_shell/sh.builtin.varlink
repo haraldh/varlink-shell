@@ -245,6 +245,19 @@ method Group(args: []string, input: ?[]object) -> (object: object)
 #   ls | sort -size | enumerate
 method Enumerate(input: ?[]object) -> (object: object)
 
+# Pretty-print input objects as a table and pass them through
+#
+# Renders input objects as an aligned table (when keys are uniform)
+# or as JSON lines (when keys differ), then passes all objects through
+# unchanged.  Useful at the end of a pipeline for explicit formatting,
+# or mid-pipeline to inspect intermediate results.
+#
+# Examples:
+#   ls | print
+#   ls | sort -size | print | count
+#   varlink unix:/run/systemd/io.systemd.Hostname Describe | print
+method Print(input: ?[]object) -> (object: object)
+
 # Connect to an external varlink service and call methods
 #
 # First argument is a varlink address (unix:/path or tcp:host:port).
