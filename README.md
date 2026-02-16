@@ -1,0 +1,100 @@
+# varlink shell
+
+An object-oriented shell built on the [varlink](https://varlink.org) protocol. Commands produce and consume typed objects — not text — connected by pipelines.
+
+## Quick start
+
+```bash
+nix develop
+python -m varlink_shell
+```
+
+```
+vsh> ls
+NAME        TYPE  SIZE
+----------  ----  ----
+flake.nix   file  820
+tests       dir   4096
+varlink_shell  dir   4096
+
+vsh> ls | grep type=file | count
+COUNT
+-----
+3
+
+vsh> help
+COMMAND     DESCRIPTION
+----------  -----------
+echo        Emit key=value pairs as an object, or pass through piped input
+ls          List directory entries
+count       Consume input objects and emit their count
+grep        Filter input objects by matching field values
+help        Show available commands and their descriptions
+jsexec      Execute an external command and parse its JSON output as objects
+map         Transform input objects by selecting, renaming, or interpolating fields
+filter_map  Like Map, but drop objects where any referenced field is missing
+foreach     Run a command for each input object with {field} substitution
+```
+
+## Core idea
+
+Every command returns a stream of typed objects (dicts with known fields). Pipelines (`|`) pass objects between commands. When output objects share the same keys, the shell renders them as an aligned table; otherwise it prints one JSON object per line.
+
+## Examples
+
+Filter directory listings:
+
+```
+vsh> ls | grep type=file name=.py | map name size
+```
+
+Pull JSON from external tools and work with it as objects:
+
+```
+vsh> jsexec curl -s https://api.github.com/repos/varlink/python/issues | map number title state
+NUMBER  TITLE                       STATE
+------  --------------------------  ------
+42      Support Python 3.14         open
+38      Add type stubs              closed
+
+vsh> jsexec curl -s https://api.github.com/repos/varlink/python/issues | grep state=open | count
+COUNT
+-----
+5
+```
+
+Reshape objects with `map` and string interpolation:
+
+```
+vsh> ls | map label="{name} ({type})" size
+```
+
+Run a command per object with `foreach`:
+
+```
+vsh> ls | grep type=file | foreach echo file={name}
+```
+
+## Commands
+
+| Command | Description |
+|---|---|
+| `echo` | Emit key=value pairs as an object, or pass through piped input |
+| `ls` | List directory entries (name, type, size) |
+| `count` | Count input objects |
+| `grep` | Filter by field=pattern substring match (AND logic) |
+| `help` | List commands or describe a specific one |
+| `jsexec` | Run external command, parse JSON stdout into objects |
+| `map` | Select, rename, or interpolate fields (missing fields omitted) |
+| `filter_map` | Like map, but drop objects where any referenced field is missing |
+| `foreach` | Run a command for each input object with `{field}` substitution |
+
+## Documentation
+
+See [doc/guide.md](doc/guide.md) for the full user guide and [doc/examples.md](doc/examples.md) for a cookbook of practical examples.
+
+## Tests
+
+```bash
+pytest tests/
+```
