@@ -201,18 +201,35 @@ List all commands or get help for a specific one.
 
 **Syntax:** `help [command]`
 
+Without arguments, shows a concise listing with one-line summaries:
+
 ```
 vsh> help
 COMMAND     DESCRIPTION
-----------  ------------------------------------------------
+----------  -------------------------------------------------------
 echo        Emit key=value pairs as an object, or pass through piped input
 ls          List directory entries
+count       Consume input objects and emit their count
 ...
+```
 
+With a command name, shows the full documentation including detailed description and examples:
+
+```
 vsh> help grep
 COMMAND  DESCRIPTION
--------  -------------------------------------------
+-------  ---------------------------------------------------
 grep     Filter input objects by matching field values
+
+         Each argument must be field=pattern.  The pattern is
+         matched as a substring against str(value) of the named
+         field.  Multiple filters use AND logic -- all must match
+         for an object to pass through.  Returns empty output if
+         nothing matches.
+
+         Examples:
+           ls | grep type=file
+           ls | grep type=file name=.py
 ```
 
 Help text comes from the `#` documentation comments in the varlink interface definition.

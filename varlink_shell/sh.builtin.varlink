@@ -1,28 +1,115 @@
 interface sh.builtin
 
 # Emit key=value pairs as an object, or pass through piped input
+#
+# With arguments, creates a single object from key=value pairs (string
+# fields) and bare words (boolean True fields).  When receiving piped
+# input, passes all input objects through unchanged and ignores any
+# arguments.
+#
+# Examples:
+#   echo name=alice age=30
+#   echo verbose
+#   ls | echo | count
 method Echo(args: []string, input: ?[]object) -> (object: object)
 
 # List directory entries
+#
+# Lists entries of the given directory (or the current directory) sorted
+# alphabetically.  Each entry is an object with name, type (file, dir,
+# or link), and size in bytes.  Entries that cannot be stat'd are
+# silently skipped.
+#
+# Examples:
+#   ls
+#   ls /tmp
+#   ls | grep type=dir
 method Ls(args: []string) -> (name: string, type: string, size: int)
 
 # Consume input objects and emit their count
+#
+# Counts the number of objects received from the pipeline and emits a
+# single object with the total.  With no input, returns count 0.
+#
+# Examples:
+#   ls | count
+#   ls | grep type=file | count
+#   count
 method Count(input: ?[]object) -> (count: int)
 
 # Filter input objects by matching field values
+#
+# Each argument must be field=pattern.  The pattern is matched as a
+# substring against str(value) of the named field.  Multiple filters
+# use AND logic -- all must match for an object to pass through.
+# Returns empty output if nothing matches.
+#
+# Examples:
+#   ls | grep type=file
+#   ls | grep type=file name=.py
 method Grep(args: []string, input: ?[]object) -> (object: object)
 
 # Show available commands and their descriptions
+#
+# Without arguments, lists all builtin commands with a short summary.
+# With a command name, shows the full documentation for that command
+# including detailed description and examples.
+#
+# Examples:
+#   help
+#   help echo
+#   help filter_map
 method Help(command: ?string) -> (command: string, description: string)
 
 # Execute an external command and parse its JSON output as objects
+#
+# Runs a subprocess, parses its stdout as JSON, and converts the result
+# to a stream of objects.  A single dict becomes one object.  An array
+# of dicts becomes multiple objects.  A single-key dict whose value is
+# a list is auto-unwrapped.  Non-dict array items are wrapped as
+# {"value": item}.  Raises ExecFailed on non-zero exit or InvalidJson
+# on unparseable output.
+#
+# Examples:
+#   jsexec curl -s https://api.github.com/repos/varlink/python/issues
+#   jsexec ip -j link | map ifname operstate
+#   jsexec lsblk -J | grep type=disk | map name size
 method Jsexec(args: []string) -> (object: object)
 
 # Transform input objects by selecting, renaming, or interpolating fields
+#
+# Three forms: bare field name selects it, key={field} renames it, and
+# key="text {a} {b}" interpolates.  A single {field} reference
+# preserves the original type; mixed interpolation produces a string.
+# Missing fields are omitted from the output but the object is still
+# emitted.
+#
+# Examples:
+#   ls | map name type
+#   ls | map label={name} size
+#   ls | map desc="{name} ({type})" size
 method Map(args: []string, input: ?[]object) -> (object: object)
 
-# Like Map, but drop objects where any referenced field is missing
+# Like map, but drop objects where any referenced field is missing
+#
+# Works exactly like map for selecting, renaming, and interpolating
+# fields, but silently drops any input object that is missing one or
+# more of the referenced fields instead of emitting an incomplete
+# object.
+#
+# Examples:
+#   echo a=1 b=2 | filter_map a b
+#   echo a=1 | filter_map a b
 method FilterMap(args: []string, input: ?[]object) -> (object: object)
 
 # Run a command for each input object with {field} substitution
+#
+# For each input object, replaces {field} placeholders in the command
+# template with values from the object (shell-escaped), then executes
+# the resulting command line as a full pipeline.  Missing fields are
+# substituted as empty strings.  The template can include pipes.
+#
+# Examples:
+#   echo a=hello | foreach echo x={a}
+#   echo a=hello | foreach "echo x={a} | grep x=hello"
 method Foreach(args: []string, input: ?[]object) -> (object: object)

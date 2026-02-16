@@ -143,10 +143,17 @@ class Builtins:
         if command:
             member = interface.get_method(_method_name(command))
             doc = member.doc.strip() if member.doc else ""
-            yield {"command": command.lower(), "description": doc, "_continues": False}
+            lines = doc.split("\n")
+            for i, line in enumerate(lines):
+                yield {
+                    "command": command.lower() if i == 0 else "",
+                    "description": line,
+                    "_continues": i < len(lines) - 1,
+                }
         else:
             methods = [
-                (_command_name(name), member.doc.strip() if member.doc else "")
+                (_command_name(name), member.doc.strip().split("\n\n", 1)[0]
+                 if member.doc else "")
                 for name, member in interface.members.items()
                 if isinstance(member, _Method)
             ]

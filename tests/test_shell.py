@@ -91,7 +91,7 @@ class TestExecution:
 
     def test_help_single_command(self):
         result = execute("help grep")
-        assert len(result) == 1
+        assert len(result) >= 1
         assert result[0]["command"] == "grep"
         assert result[0]["description"] != ""
 
