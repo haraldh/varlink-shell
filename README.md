@@ -91,8 +91,33 @@ vsh> ls | grep type=file | foreach echo file={name}
 Work with nested objects using dotted paths (e.g. systemd varlink APIs):
 
 ```
-vsh> varlink unix:/run/systemd/io.systemd.Manager io.systemd.Unit.List | where context.Type=service runtime.ActiveState=active | map context.ID context.Description | head 10
+vsh> varlink unix:/run/systemd/io.systemd.Manager io.systemd.Unit.List | where context.Type=service runtime.ActiveState=active | map id={context.ID} description={context.Description} | sort id | head 10
+ID                                  DESCRIPTION
+----------------------------------  -------------------------------------------
+ModemManager.service                Modem Manager
+NetworkManager-wait-online.service  Network Manager Wait Online
+NetworkManager.service              Network Manager
+accounts-daemon.service             Accounts Service
+avahi-daemon.service                Avahi mDNS/DNS-SD Stack
+bluetooth.service                   Bluetooth service
+bolt.service                        Thunderbolt system service
+colord.service                      Manage, Install and Generate Color Profiles
+cpufreq.service                     CPU Frequency Setup
+cratedocs-mcp.service               CrateDocs MCP server
+
 vsh> varlink unix:/run/systemd/io.systemd.Manager io.systemd.Unit.List | map type={context.Type} | group type | sort -count
+TYPE     COUNT
+-------  -----
+service  206
+device   105
+target   48
+socket   41
+mount    17
+slice    13
+timer    6
+swap     4
+path     2
+scope    2
 ```
 
 ## Commands
